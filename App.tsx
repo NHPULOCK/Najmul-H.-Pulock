@@ -1,12 +1,12 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Journey, RouteLeg, Language, TRANSLATIONS } from './types';
 import { findDirectRoute, findTransferRoute } from './services/navigationEngine';
 import { geminiService } from './services/geminiService';
 import BusMap from './components/BusMap';
 import { 
   MapPin, Search, Navigation, Bus, Footprints, Clock, ArrowRight, 
-  Info, AlertTriangle, Layers, Globe, DollarSign, MessageSquare, ArrowUpDown, Crosshair
+  Info, AlertTriangle, Layers, Globe, DollarSign, MessageSquare, ArrowUpDown, Crosshair, ChevronUp, ChevronDown
 } from 'lucide-react';
 
 const POPULAR_STOPS = ["Farmgate", "Motijheel", "Gabtoli", "Uttara", "Gulistan", "Mirpur 10"];
@@ -20,11 +20,12 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [aiAnalysis, setAiAnalysis] = useState<any>(null);
   const [isLocating, setIsLocating] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   const T = TRANSLATIONS[lang];
 
   useEffect(() => {
-    handleLocateMe(false); // Silent check on load
+    handleLocateMe(false);
   }, []);
 
   const handleLocateMe = (force: boolean = true) => {
@@ -39,10 +40,9 @@ const App: React.FC = () => {
           }
           setIsLocating(false);
         },
-        (err) => {
-          console.warn("GPS Access Denied", err);
+        () => {
           setIsLocating(false);
-          if (force) alert("Could not access GPS. Please enter location manually.");
+          if (force) alert("GPS Access Denied.");
         },
         { enableHighAccuracy: true, timeout: 5000 }
       );
@@ -56,41 +56,25 @@ const App: React.FC = () => {
   };
 
   const handleSearch = async () => {
-    // If 'from' is current location, we use a placeholder for search or the nearest stop logic
-    // For this prototype, we'll try to find the best route from the text entered
-    const searchFrom = (from === "Current Location" || from === "বর্তমান অবস্থান") ? "Farmgate" : from; // Fallback to nearest major hub if current location
-    
+    const searchFrom = (from === "Current Location" || from === "বর্তমান অবস্থান") ? "Farmgate" : from;
     if (!searchFrom || !to) return;
+    
     setLoading(true);
     setAiAnalysis(null);
+    setIsExpanded(true); // Expand results on mobile
 
     let result = findDirectRoute(searchFrom, to);
-    if (!result) {
-      result = findTransferRoute(searchFrom, to);
-    }
+    if (!result) result = findTransferRoute(searchFrom, to);
 
     if (result) {
-      // Create complete door-to-door experience
-      const initialWalk: RouteLeg = { 
-        type: 'WALK', 
-        from: from, 
-        to: result.legs[0].from, 
-        distance: '650m', 
-        time: '8 mins' 
-      };
-      const finalWalk: RouteLeg = { 
-        type: 'WALK', 
-        from: result.legs[result.legs.length - 1].to, 
-        to: to, 
-        distance: '300m', 
-        time: '4 mins' 
-      };
-      
       const fullJourney: Journey = {
         ...result,
-        legs: [initialWalk, ...result.legs, finalWalk]
+        legs: [
+          { type: 'WALK', from: from, to: result.legs[0].from, distance: '650m', time: '8 mins' },
+          ...result.legs,
+          { type: 'WALK', from: result.legs[result.legs.length - 1].to, to: to, distance: '300m', time: '4 mins' }
+        ]
       };
-      
       setJourney(fullJourney);
       const analysis = await geminiService.analyzeRoute(searchFrom, to);
       setAiAnalysis(analysis);
@@ -102,231 +86,211 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col lg:flex-row h-screen bg-slate-50 text-slate-900 font-sans">
-      {/* Sidebar */}
-      <div className="w-full lg:w-[480px] bg-white shadow-2xl z-10 flex flex-col h-[60vh] lg:h-full overflow-hidden">
+    <div className="relative h-screen w-screen bg-slate-100 overflow-hidden font-sans">
+      
+      {/* MAP BACKGROUND (Full Screen on Mobile, Right side on Desktop) */}
+      <div className="absolute inset-0 lg:left-[420px] z-0">
+        <BusMap journey={journey} userLocation={userLocation} />
+      </div>
+
+      {/* FLOATING ACTION BUTTONS (Mobile Top/Right) */}
+      <div className="absolute top-4 right-4 z-20 flex flex-col gap-3 lg:hidden">
+        <button 
+          onClick={() => setLang(lang === 'en' ? 'bn' : 'en')}
+          className="p-3 bg-white/90 backdrop-blur rounded-2xl shadow-xl text-indigo-700 border border-indigo-100"
+        >
+          <Globe size={20} />
+        </button>
+        <button 
+          onClick={() => handleLocateMe()}
+          className={`p-3 bg-white/90 backdrop-blur rounded-2xl shadow-xl border border-indigo-100 ${isLocating ? 'text-orange-500' : 'text-indigo-700'}`}
+        >
+          <Navigation size={20} />
+        </button>
+      </div>
+
+      {/* SIDEBAR / BOTTOM SHEET */}
+      <div className={`
+        absolute z-30 transition-all duration-500 ease-in-out
+        bg-white shadow-[0_-10px_40px_rgba(0,0,0,0.1)] lg:shadow-2xl
+        
+        /* Mobile: Bottom Sheet */
+        bottom-0 left-0 w-full rounded-t-[2.5rem] lg:rounded-none
+        ${isExpanded ? 'h-[90vh]' : 'h-[320px]'}
+        
+        /* Desktop: Fixed Sidebar */
+        lg:top-0 lg:left-0 lg:h-full lg:w-[420px] lg:rounded-none lg:flex lg:flex-col
+      `}>
+        
+        {/* Mobile Drag Handle */}
+        <div 
+          className="lg:hidden w-full flex justify-center py-4 cursor-pointer"
+          onClick={() => setIsExpanded(!isExpanded)}
+        >
+          <div className="w-12 h-1.5 bg-slate-200 rounded-full" />
+        </div>
+
         {/* Header Section */}
-        <div className="p-6 bg-indigo-700 text-white shadow-lg shrink-0">
-          <div className="flex items-center justify-between mb-4">
+        <div className="px-6 lg:pt-8 pb-4 bg-white shrink-0">
+          <div className="hidden lg:flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
-              <div className="bg-white p-2 rounded-xl shadow-md">
-                <Bus className="text-indigo-700" size={24} />
-              </div>
-              <div>
-                <h1 className="text-2xl font-black tracking-tight leading-none">{T.title}</h1>
-                <p className="text-indigo-200 text-xs font-medium uppercase tracking-widest mt-1">{T.subtitle}</p>
-              </div>
+              <Bus className="text-indigo-600" size={28} />
+              <h1 className="text-2xl font-black text-slate-800 tracking-tight">{T.title}</h1>
             </div>
             <button 
               onClick={() => setLang(lang === 'en' ? 'bn' : 'en')}
-              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-full text-xs font-bold transition-all border border-indigo-400/30"
+              className="text-xs font-bold text-indigo-600 hover:bg-indigo-50 px-3 py-1.5 rounded-full transition-colors"
             >
-              <Globe size={14} /> {lang === 'en' ? 'বাংলা' : 'English'}
+              {lang === 'en' ? 'বাংলা' : 'English'}
             </button>
           </div>
-          
-          <div className="relative space-y-2">
-            <div className="relative group">
-              <MapPin className="absolute left-3 top-3.5 text-indigo-300 group-focus-within:text-white transition-colors" size={18} />
+
+          <div className="space-y-3 relative">
+            <div className="relative">
+              <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
               <input 
                 value={from}
                 onChange={(e) => setFrom(e.target.value)}
                 placeholder={T.fromPlaceholder} 
-                className="w-full bg-indigo-600/50 border border-indigo-500/50 placeholder-indigo-200 text-white rounded-2xl py-3.5 pl-10 pr-12 focus:ring-2 focus:ring-white outline-none transition-all font-medium"
+                className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3.5 pl-11 pr-12 focus:ring-2 focus:ring-indigo-500 outline-none text-base font-medium"
               />
               <button 
                 onClick={() => handleLocateMe()}
-                className={`absolute right-3 top-2.5 p-1.5 rounded-lg hover:bg-indigo-500 transition-colors ${isLocating ? 'animate-pulse text-orange-400' : 'text-indigo-200'}`}
-                title="Use Current Location"
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-indigo-500 hover:bg-indigo-50 rounded-lg"
               >
                 <Crosshair size={20} />
               </button>
             </div>
 
-            {/* Swap Button Floating */}
-            <div className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 top-1/2 z-20">
-              <button 
-                onClick={handleSwap}
-                className="bg-white text-indigo-700 p-2 rounded-full shadow-lg border border-indigo-100 hover:scale-110 active:rotate-180 transition-all duration-300"
-              >
-                <ArrowUpDown size={16} />
-              </button>
-            </div>
+            <button 
+              onClick={handleSwap}
+              className="absolute right-4 top-1/2 -translate-y-1/2 translate-x-12 lg:relative lg:translate-x-0 lg:my-[-12px] lg:mx-auto z-10 bg-white border border-slate-200 p-2 rounded-full shadow-md text-slate-400 hover:text-indigo-600 lg:block hidden"
+            >
+              <ArrowUpDown size={16} />
+            </button>
 
-            <div className="relative group">
-              <Search className="absolute left-3 top-3.5 text-indigo-300 group-focus-within:text-white transition-colors" size={18} />
+            <div className="relative">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
               <input 
                 value={to}
                 onChange={(e) => setTo(e.target.value)}
                 placeholder={T.toPlaceholder} 
-                className="w-full bg-indigo-600/50 border border-indigo-500/50 placeholder-indigo-200 text-white rounded-2xl py-3.5 pl-10 pr-4 focus:ring-2 focus:ring-white outline-none transition-all font-medium"
+                className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3.5 pl-11 pr-4 focus:ring-2 focus:ring-indigo-500 outline-none text-base font-medium"
               />
-            </div>
-
-            {/* Popular Stop Quick Picks */}
-            <div className="flex gap-2 overflow-x-auto no-scrollbar pt-1 pb-2">
-              {POPULAR_STOPS.map(stop => (
-                <button 
-                  key={stop}
-                  onClick={() => setTo(stop)}
-                  className="shrink-0 bg-indigo-800/40 hover:bg-indigo-500/60 border border-indigo-400/20 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider transition-colors"
-                >
-                  {stop}
-                </button>
-              ))}
             </div>
 
             <button 
               onClick={handleSearch}
               disabled={loading}
-              className="w-full bg-orange-500 hover:bg-orange-600 active:scale-95 disabled:bg-slate-400 text-white font-black py-4 rounded-2xl transition-all shadow-xl flex items-center justify-center gap-3 uppercase tracking-wider mt-2"
+              className="w-full bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] disabled:bg-slate-300 text-white font-black py-4 rounded-2xl transition-all shadow-lg flex items-center justify-center gap-3 uppercase tracking-widest mt-2"
             >
               {loading ? <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" /> : T.findRoute}
             </button>
           </div>
         </div>
 
-        {/* Scrollable Directions Area */}
-        <div className="flex-1 overflow-y-auto p-6 no-scrollbar bg-slate-50/50">
+        {/* Directions Content */}
+        <div className="flex-1 overflow-y-auto px-6 pb-12 lg:pb-8 no-scrollbar bg-white">
           {!journey && !loading && (
-            <div className="flex flex-col items-center justify-center h-full text-slate-400 text-center py-10 opacity-60">
-              <div className="w-24 h-24 bg-white rounded-3xl shadow-sm border border-slate-100 flex items-center justify-center mb-6">
-                <Navigation size={48} className="text-indigo-200" />
+            <div className="flex flex-col items-center justify-center pt-8 text-center">
+              <div className="flex gap-2 overflow-x-auto w-full no-scrollbar pb-6">
+                {POPULAR_STOPS.map(stop => (
+                  <button 
+                    key={stop}
+                    onClick={() => { setTo(stop); setIsExpanded(true); }}
+                    className="shrink-0 bg-slate-100 hover:bg-indigo-50 border border-slate-200 px-4 py-2 rounded-xl text-xs font-bold text-slate-600 transition-colors"
+                  >
+                    {stop}
+                  </button>
+                ))}
               </div>
-              <p className="text-lg font-bold text-slate-500 max-w-[250px] leading-tight">Enter your manual locations or use GPS to start navigating Dhaka.</p>
-              <p className="text-xs font-medium text-slate-400 mt-2 italic">Tip: You can swap from/to anytime.</p>
+              <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Plan your trip</p>
             </div>
           )}
 
           {journey && (
-            <div className="space-y-6 pb-20">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-3">
-                  <div className="bg-indigo-50 p-2 rounded-lg">
-                    <Clock className="text-indigo-600" size={20} />
+            <div className="space-y-6 pt-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <div className="flex items-center justify-between p-5 bg-indigo-50 rounded-3xl border border-indigo-100">
+                <div className="flex items-center gap-3">
+                  <div className="bg-indigo-600 p-2 rounded-xl text-white shadow-md">
+                    <Clock size={20} />
                   </div>
                   <div>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">{T.est}</p>
-                    <p className="font-bold text-slate-800">{journey.totalTime}</p>
+                    <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Arrive In</p>
+                    <p className="text-lg font-black text-indigo-900">{journey.totalTime}</p>
                   </div>
                 </div>
-                <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-3">
-                  <div className="bg-green-50 p-2 rounded-lg">
-                    <DollarSign className="text-green-600" size={20} />
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">{T.totalFare}</p>
-                    <p className="font-bold text-slate-800">৳{journey.totalFare}</p>
-                  </div>
+                <div className="text-right">
+                  <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">{T.totalFare}</p>
+                  <p className="text-lg font-black text-indigo-900">৳{journey.totalFare}</p>
                 </div>
               </div>
 
-              {/* Step by Step Navigation */}
-              <div className="relative pl-2">
-                <div className="absolute left-6 top-8 bottom-8 w-1 bg-slate-200 rounded-full" />
-                <div className="space-y-10">
-                  {journey.legs.map((leg, i) => (
-                    <div key={i} className="flex gap-6 relative group">
-                      <div className={`z-10 w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg transform group-hover:scale-110 transition-transform ${
-                        leg.type === 'BUS' ? 'bg-orange-500 text-white' : 'bg-emerald-500 text-white'
-                      }`}>
-                        {leg.type === 'BUS' ? <Bus size={24} /> : <Footprints size={24} />}
-                      </div>
-                      <div className="flex-1 pt-1">
-                        <div className="flex items-center justify-between">
-                          <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">
-                            {T.step} {i+1}: {leg.type === 'BUS' ? T.take : T.walk}
-                          </p>
-                          {leg.fare && <span className="text-xs font-bold text-slate-400">৳{leg.fare}</span>}
-                        </div>
-                        <h3 className="font-extrabold text-slate-900 text-lg flex items-center gap-2 mt-1">
-                          {leg.from} <ArrowRight size={16} className="text-slate-300" /> {leg.to}
-                        </h3>
-                        {leg.type === 'BUS' ? (
-                          <div className="mt-2 flex flex-wrap items-center gap-2">
-                            <span className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-lg text-xs font-black uppercase">{leg.busName}</span>
-                            <span className="text-xs font-bold text-slate-500">{leg.stopsCount} {T.stops}</span>
-                          </div>
-                        ) : (
-                          <p className="text-sm font-bold text-slate-500 mt-1 italic">{T.walk} {leg.distance} (~{leg.time})</p>
-                        )}
-                      </div>
+              {/* Legs */}
+              <div className="relative pl-2 space-y-10 py-4">
+                <div className="absolute left-6 top-10 bottom-10 w-0.5 bg-slate-100" />
+                {journey.legs.map((leg, i) => (
+                  <div key={i} className="flex gap-6 relative group">
+                    <div className={`z-10 w-12 h-12 rounded-2xl flex items-center justify-center shadow-md ${
+                      leg.type === 'BUS' ? 'bg-orange-500 text-white' : 'bg-emerald-500 text-white'
+                    }`}>
+                      {leg.type === 'BUS' ? <Bus size={22} /> : <Footprints size={22} />}
                     </div>
-                  ))}
-                </div>
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">{T.step} {i+1}</span>
+                        {leg.fare && <span className="text-xs font-bold text-slate-500">৳{leg.fare}</span>}
+                      </div>
+                      <h4 className="font-bold text-slate-800 text-base leading-tight">
+                        {leg.from} <ArrowRight size={14} className="inline mx-1 text-slate-300" /> {leg.to}
+                      </h4>
+                      {leg.type === 'BUS' ? (
+                        <div className="mt-2 inline-flex items-center gap-2 bg-slate-100 px-3 py-1 rounded-lg">
+                          <span className="text-[11px] font-black text-indigo-600 uppercase">{leg.busName}</span>
+                          <span className="w-1 h-1 bg-slate-300 rounded-full" />
+                          <span className="text-[11px] font-bold text-slate-500">{leg.stopsCount} {T.stops}</span>
+                        </div>
+                      ) : (
+                        <p className="text-xs font-bold text-emerald-600 mt-1 uppercase tracking-tight">{T.walk} {leg.distance} (~{leg.time})</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
 
-              {/* Gemini AI Powered Insights */}
+              {/* AI Insights Card */}
               {aiAnalysis && (
-                <div className="bg-indigo-900 text-white p-6 rounded-[2rem] shadow-2xl relative overflow-hidden group">
-                  <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                    <Info size={100} />
-                  </div>
-                  <div className="flex items-center gap-2 mb-6 border-b border-indigo-500/30 pb-4">
-                    <div className="bg-indigo-500 p-1.5 rounded-lg"><MessageSquare size={16} /></div>
-                    <h4 className="font-black uppercase text-xs tracking-[0.2em]">{T.aiInsights}</h4>
+                <div className="bg-slate-900 text-white p-6 rounded-[2.5rem] shadow-xl space-y-6">
+                  <div className="flex items-center gap-3 opacity-60">
+                    <Info size={16} />
+                    <h5 className="text-[10px] font-black uppercase tracking-[0.2em]">{T.aiInsights}</h5>
                   </div>
                   
-                  <div className="space-y-6 relative z-10">
-                    <div>
-                      <h5 className="text-xs font-black text-indigo-300 uppercase tracking-widest mb-3">{T.landmarks}</h5>
-                      <div className="flex flex-wrap gap-2">
-                        {aiAnalysis.landmarks.map((l: string, idx: number) => (
-                          <span key={idx} className="bg-white/10 backdrop-blur-md px-4 py-2 rounded-xl text-xs font-bold border border-white/10 hover:bg-white/20 transition-all cursor-default">{l}</span>
-                        ))}
-                      </div>
+                  <div>
+                    <h6 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-3">{T.landmarks}</h6>
+                    <div className="flex flex-wrap gap-2">
+                      {aiAnalysis.landmarks.map((l: string, idx: number) => (
+                        <span key={idx} className="bg-white/10 px-3 py-1.5 rounded-xl text-xs font-bold">{l}</span>
+                      ))}
                     </div>
+                  </div>
 
-                    <div className="bg-black/20 p-4 rounded-2xl border border-indigo-500/20">
-                      <h5 className="text-xs font-black text-amber-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                        <AlertTriangle size={14} /> {T.trafficWatch}
-                      </h5>
-                      <p className="text-sm text-indigo-100 font-medium leading-relaxed italic">"{aiAnalysis.trafficAdvice}"</p>
+                  <div className="p-4 bg-white/5 rounded-2xl border border-white/10">
+                    <div className="flex items-center gap-2 text-amber-400 mb-2">
+                      <AlertTriangle size={14} />
+                      <span className="text-[10px] font-black uppercase tracking-widest">{T.trafficWatch}</span>
                     </div>
+                    <p className="text-sm text-slate-300 italic font-medium">"{aiAnalysis.trafficAdvice}"</p>
+                  </div>
 
-                    <div className="flex items-center justify-between pt-2">
-                      <span className="text-[10px] font-black text-indigo-300 uppercase tracking-widest">{T.lastMile}</span>
-                      <span className="bg-orange-500 text-white px-4 py-1.5 rounded-full text-xs font-black shadow-lg">{aiAnalysis.lastMileMode}</span>
-                    </div>
+                  <div className="flex items-center justify-between pt-2 border-t border-white/10">
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Recommended Transfer</span>
+                    <span className="bg-orange-500 text-white px-4 py-1.5 rounded-xl text-xs font-black">{aiAnalysis.lastMileMode}</span>
                   </div>
                 </div>
               )}
             </div>
           )}
-        </div>
-      </div>
-
-      {/* Map View */}
-      <div className="flex-1 relative">
-        <BusMap journey={journey} userLocation={userLocation} />
-        
-        {/* Map Control Buttons */}
-        <div className="absolute top-6 right-6 z-20 flex flex-col gap-3">
-          <button 
-            onClick={() => handleLocateMe()}
-            className="p-4 bg-white rounded-2xl shadow-2xl text-indigo-600 hover:bg-indigo-50 active:scale-90 transition-all border border-slate-100"
-            title="Locate Me"
-          >
-            <Navigation size={28} />
-          </button>
-          
-          <div className="p-4 bg-white/90 backdrop-blur-lg rounded-2xl shadow-2xl border border-slate-100 hidden md:block w-48">
-            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Navigation Status</h4>
-            <div className="space-y-3">
-              <div className="flex items-center gap-3">
-                <div className={`w-3 h-3 rounded-full ${userLocation ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-slate-300'}`} />
-                <span className="text-[11px] font-extrabold text-slate-600">{userLocation ? 'GPS Online' : 'Manual Entry'}</span>
-              </div>
-              <div className="flex items-center gap-3 pt-2 border-t border-slate-100">
-                <div className="w-6 h-1.5 bg-orange-500 rounded-full" />
-                <span className="text-[11px] font-extrabold text-slate-600">Bus Path</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="w-6 h-1.5 bg-emerald-500 rounded-full border-t-2 border-dashed border-emerald-300" />
-                <span className="text-[11px] font-extrabold text-slate-600">Walking</span>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
     </div>
