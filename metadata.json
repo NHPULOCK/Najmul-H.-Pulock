@@ -1,0 +1,7 @@
+{
+  "name": "Dhaka Patho - Bus Route Navigator",
+  "description": "A comprehensive navigation app for Dhaka's bus network providing door-to-door directions, transfer optimization, and real-time route visualization.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
